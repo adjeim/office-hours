@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, abort
 from twilio.rest import Client
 from tinydb import TinyDB, Query
+from pyngrok import ngrok
 
 load_dotenv()
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
@@ -19,15 +20,13 @@ def index():
     return render_template('index.html')
 
 
-@app.route('/create', methods=['POST'])
+@app.route('/', methods=['POST'])
 def get_or_create_room():
-    request_data = request.get_json()
+    identity = request.form.get('identity').strip() or None
+    phone = request.form.get('phone').strip() or None
+    room_name = request.form.get('room_name').strip() or None
 
-    identity = request_data.get('identity')
-    phone = request_data.get('phone')
-    room_name = request_data.get('roomName')
-
-    if not identity or not phone or not room_name:
+    if identity is None or phone is None or room_name is None:
         abort(400, 'Missing one of: identity, phone, room_name')
 
     # Try to get the room if it exists
@@ -35,11 +34,14 @@ def get_or_create_room():
     found_video_rooms = [room for room in video_room_list if room.unique_name == room_name]
     video_room = found_video_rooms[0] if found_video_rooms else None
 
+    request_url = request.url_root
+    callback_url = f'{request_url}message'
+
+    if video_room and video_room.status_callback != callback_url:
+        abort(400, 'Status callback URL has changed; please create a room with a different name')
+
     # If the room does not exist, create a new one
     if not video_room:
-        request_url = request.headers.get('referer')
-        callback_url = f'{request_url}message'
-
         video_room = client.video.rooms.create(
             unique_name=room_name,
             empty_room_timeout=60,
@@ -63,7 +65,7 @@ def get_or_create_room():
     if not selected_meeting:
         db.insert(office_hours_appointment)
 
-    return {
+    return render_template('index.html', status={
         'video_room': {
             'sid': video_room.sid,
             'name': video_room.unique_name,
@@ -71,7 +73,7 @@ def get_or_create_room():
             'unused_room_timeout': video_room.unused_room_timeout,
             'status_callback': video_room.status_callback
         }
-    }
+    })
 
 
 @app.route('/message', methods=['POST'])
@@ -92,17 +94,10 @@ def send_participant_notification():
         identity = selected_meeting.get('identity')
 
         # Send an SMS to the creator of the video meeting
-        message = client.messages.create(
+        client.messages.create(
             body=f'Hello {identity}! {participant} has joined your office hours room: {room_name}',
             from_=TWILIO_PHONE_NUMBER,
             to=phone
         )
 
-        return {
-            'status': 'Message sent!',
-            'message_sid': message.sid,
-        }
-
-    return {
-        'status': 'No message sent.',
-    }
+    return ('', 204)
