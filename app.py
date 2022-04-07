@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, abort
 from twilio.rest import Client
 from tinydb import TinyDB, Query
-from pyngrok import ngrok
 
 load_dotenv()
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
